@@ -20,6 +20,11 @@ agents with specific behaviors. It provides the following features:
 """
 
 import asyncio
+import logging
+
+from configs.config import BEHAVIOUR_INTERVAL, CONSUME_INTERVAL
+from lib.exception import IncorrectMessageContentException, IncorrectMessageFormatException
+from models.message import Message
 
 
 class AutonomousAgent:
@@ -31,6 +36,8 @@ class AutonomousAgent:
         outbox (asyncio.Queue): Queue for outgoing messages.
         message_handlers (dict): Dictionary mapping message types to handler functions.
         behaviors (list): List of behavior functions.
+        behavior_interval = time in sec
+        consume_interval = time in sec
 
     Methods:
         consume_messages(): Continuously consumes messages from the inbox.
@@ -46,28 +53,59 @@ class AutonomousAgent:
         self.outbox = asyncio.Queue()
         self.message_handlers = {}
         self.behaviors = []
+        self.behavior_interval = BEHAVIOUR_INTERVAL
+        self.consume_interval = CONSUME_INTERVAL
 
     async def consume_messages(self):
         """
         Continuously consumes messages from the inbox.
         """
         while True:
-            message = await self.inbox.get()
-            await self.handle_message(message)
+            try:
+                message = await self.inbox.get()
+                await self.handle_message(message)
+                await asyncio.sleep(self.consume_interval)
+            except asyncio.CancelledError:
+                logging.info("Message consumption task cancelled.")
+                break
+            except Exception as e:
+                logging.exception(f"Error consuming message: {e}")
 
     async def handle_message(self, message):
         """
         Handles an incoming message using the appropriate handler.
 
         Args:
-            message (dict): The incoming message.
+            message (class Message): The incoming message.
 
         Returns:
             None
         """
-        handler = self.message_handlers.get(message["type"])
+        try:
+            if not isinstance(message, Message):
+                raise IncorrectMessageFormatException(
+                    "Received message is not in correct format, skipping further processing."
+                )
+            elif len(message.content.split(" ")) != 2:
+                msg = (
+                    f"Received wrong message content:'{message.content}' from '{message.agent_id}',"
+                    "\nit should have only 2 words separated with a single space.\n"
+                    "Skipping further processing."
+                )
+                raise IncorrectMessageContentException(msg)
+        except (IncorrectMessageFormatException, IncorrectMessageContentException) as e:
+            logging.warning(e)
+            return  # Skip: processing incorrect messages
+
+        # Note: If message is intance of Message class then automatically it becomes ready for
+        # preprocessing as it will hold proper values of all required attributes hence no recheck.
+        handler = self.message_handlers.get(message.type)
+
         if handler:
-            await handler(message)
+            try:
+                await handler(message)
+            except Exception as e:
+                logging.exception(f"Error in handling message: {message.content}\n{e}")
 
     async def emit_message(self, message):
         """
@@ -79,7 +117,13 @@ class AutonomousAgent:
         Returns:
             None
         """
-        await self.outbox.put(message)
+        try:
+            if self.outbox.full():
+                logging.warning("Outbox is full. Message has been dropped.")
+            else:
+                await self.outbox.put(message)
+        except Exception as e:
+            logging.exception("Error emitting message: %s", e)
 
     def register_message_handler(self, message_type, handler):
         """
@@ -92,7 +136,10 @@ class AutonomousAgent:
         Returns:
             None
         """
-        self.message_handlers[message_type] = handler
+        try:
+            self.message_handlers[message_type] = handler
+        except Exception as e:
+            logging.error(f"Error occurred while registering message handler: {e}")
 
     def register_behavior(self, behavior):
         """
@@ -104,7 +151,10 @@ class AutonomousAgent:
         Returns:
             None
         """
-        self.behaviors.append(behavior)
+        try:
+            self.behaviors.append(behavior)
+        except Exception as e:
+            logging.error(f"Error occurred while registering behavior: {e}")
 
     async def run_behaviors(self):
         """
@@ -114,6 +164,12 @@ class AutonomousAgent:
             None
         """
         while True:
-            for behavior in self.behaviors:
-                await behavior()
-            await asyncio.sleep(2)
+            try:
+                for behavior in self.behaviors:
+                    await behavior()
+                await asyncio.sleep(self.behavior_interval)
+            except asyncio.CancelledError:
+                logging.info("Behavior execution task cancelled.")
+                break
+            except Exception as e:
+                logging.exception(f"Error running behaviors: {e}")

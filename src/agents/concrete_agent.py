@@ -20,6 +20,8 @@ import logging
 import random
 
 from configs.config import ALPHABET
+from lib.utility import process_data
+from models.message import Message
 
 from .autonomous_agent import AutonomousAgent
 
@@ -48,31 +50,42 @@ class ConcreteAgent(AutonomousAgent):
             None
         """
         super().__init__()
-        self.register_message_handler("custom", self.handle_custom_message)
+
+        # Get: 'msg_type' and 'agent_id'.
+        # Note: this is designed in a way that these can be passed from main.
+        input_msg_type = "custom"
+        input_agent_id = Message.generate_agent_id()
+        self.agent_id = process_data(input_agent_id)
+        self.msg_type = (
+            Message.DEFAULT_TYPE if process_data(input_msg_type) is None else input_msg_type
+        )
+        self.msg_type = (
+            "custom" if not (self.msg_type == Message.DEFAULT_TYPE) else Message.DEFAULT_TYPE
+        )
+
+        self.register_message_handler(self.msg_type, self.handle_custom_message)
         self.register_behavior(self.generate_random_message)
+        logging.info(f"Invoking Agent: {self.agent_id}.")
 
     async def handle_custom_message(self, message):
         """
-        Handles an incoming custom message containing the word "hello".
+        Handles an incoming custom message containing data about message and agent.
 
         Args:
-            message (dict): The incoming message.
+            message (class Message): The incoming message.
 
         Returns:
             None
         """
-        if "hello" in message["content"]:
-            logging.info(f"Received message: {message}")
+        if "hello" in message.content:
+            logging.info(
+                f"Received '{message.type}' message '{message.content}' from '{message.agent_id}'."
+            )
 
     async def generate_random_message(self) -> None:
         """
         Generates a random custom message by selecting two words from an alphabet list.
-
-        Args:
-            None
-
-        Returns:
-            None
         """
-        message = " ".join(random.sample(ALPHABET, 2))
-        await self.emit_message({"type": "custom", "content": message})
+        message_content = process_data(" ".join(random.sample(ALPHABET, 2)))
+        message = Message(self.agent_id, type=self.msg_type, content=message_content)
+        await self.emit_message(message)

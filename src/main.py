@@ -20,31 +20,38 @@ async def main():
     Returns:
         None
     """
+    try:
+        # Create: two instances of ConcreteAgent
+        logging.info("Preparing the agents.")
+        agent1 = ConcreteAgent()
+        agent2 = ConcreteAgent()
 
-    # Create: two instances of ConcreteAgent
-    logging.info("Preparing the agents.")
-    agent1 = ConcreteAgent()
-    agent2 = ConcreteAgent()
+        # Connect: the agents outboxes to each other's inboxes
+        agent1.outbox = agent2.inbox
+        agent2.outbox = agent1.inbox
 
-    # Connect: the agents outboxes to each other's inboxes
-    agent1.outbox = agent2.inbox
-    agent2.outbox = agent1.inbox
+        # Start: consuming messages and running behaviors for each agent
+        logging.info("Starting the agents with:")
+        logging.info("behaviour: to generate random 2-word messages.")
+        logging.info(
+            "handler: to filters messages for the keyword 'hello' and then print it's content."
+        )
+        tasks = [
+            asyncio.create_task(agent1.consume_messages()),
+            asyncio.create_task(agent2.consume_messages()),
+            asyncio.create_task(agent1.run_behaviors()),
+            asyncio.create_task(agent2.run_behaviors()),
+        ]
 
-    # Start: consuming messages and running behaviors for each agent
-    logging.info("Starting the agents with:")
-    logging.info("behaviour: to generate random 2-word messages.")
-    logging.info(
-        "handler: to filters messages for the keyword 'hello' and then print it's content."
-    )
-    tasks = [
-        asyncio.create_task(agent1.consume_messages()),
-        asyncio.create_task(agent2.consume_messages()),
-        asyncio.create_task(agent1.run_behaviors()),
-        asyncio.create_task(agent2.run_behaviors()),
-    ]
+        # Wait: for all tasks to complete
+        await asyncio.gather(*tasks)
 
-    # Wait: for all tasks to complete
-    await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        logging.info("Stopping the agents.")
+        for task in tasks:
+            task.cancel()
+    except Exception as e:
+        logging.exception(f"Oops! Our agents are down as: {e}")
 
 
 if __name__ == "__main__":
